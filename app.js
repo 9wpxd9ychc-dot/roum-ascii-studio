@@ -7,7 +7,8 @@ const uploadZone = $("uploadZone");
 const chars = " .'^,:;Il!i><~+_-?][}{1)(|\\/*tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
 const sample = document.createElement("canvas");
 const sampleCtx = sample.getContext("2d", { willReadFrequently: true });
-const state = { file: null, url: null, columns: 112, fps: 24, palette: "color", raf: 0, recording: false, lastFrame: 0, renderUrl: null };
+const QUALITY = { standard: { width: 1280, height: 720, columns: 120, label: "STANDARD · 720P" }, high: { width: 1920, height: 1080, columns: 180, label: "HIGH · 1080P" }, ultra: { width: 2560, height: 1440, columns: 240, label: "ULTRA · 1440P" } };
+const state = { file: null, url: null, columns: 240, fps: 30, quality: "ultra", palette: "color", raf: 0, recording: false, lastFrame: 0, renderUrl: null };
 
 function toast(message) {
   const el = $("toast"); el.textContent = message; el.classList.add("show");
@@ -154,11 +155,11 @@ async function convertToMp4(webmBlob) {
     coreURL: await toBlobURL(base + "/ffmpeg-core.js", "text/javascript"),
     wasmURL: await toBlobURL(base + "/ffmpeg-core.wasm", "application/wasm")
   });
-  await ffmpeg.writeFile("ascii-recording.webm", new Uint8Array(await webmBlob.arrayBuffer()));
+  await ffmpeg.writeFile("ascii-recording." + (webmBlob.type.includes("mp4") ? "mp4" : "webm"), new Uint8Array(await webmBlob.arrayBuffer()));
   const extension = (state.file.name.split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "");
   const originalName = "original." + extension;
   await ffmpeg.writeFile(originalName, new Uint8Array(await state.file.arrayBuffer()));
-  await ffmpeg.exec(["-i", "ascii-recording.webm", "-i", originalName, "-map", "0:v:0", "-map", "1:a?", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", "roum-ascii.mp4"]);
+  await ffmpeg.exec(["-i", "ascii-recording." + (webmBlob.type.includes("mp4") ? "mp4" : "webm"), "-i", originalName, "-map", "0:v:0", "-map", "1:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "16", "-pix_fmt", "yuv420p", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "24M", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", "roum-ascii.mp4"]);
   const data = await ffmpeg.readFile("roum-ascii.mp4");
   return new Blob([data], { type: "video/mp4" });
 }
@@ -212,4 +213,4 @@ async function recordVideo() {
   }
 }
 $("renderButton").addEventListener("click", recordVideo);
-drawPlaceholder(); updateControls();
+applyQuality("ultra"); drawPlaceholder(); updateControls();
