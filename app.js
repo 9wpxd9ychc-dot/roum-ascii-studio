@@ -7,7 +7,7 @@ const uploadZone = $("uploadZone");
 const chars = " .'^,:;Il!i><~+_-?][}{1)(|\\/*tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
 const sample = document.createElement("canvas");
 const sampleCtx = sample.getContext("2d", { willReadFrequently: true });
-const QUALITY = { standard: { width: 1280, height: 720, columns: 120, label: "STANDARD · 720P" }, high: { width: 1920, height: 1080, columns: 180, label: "HIGH · 1080P" }, ultra: { width: 2560, height: 1440, columns: 240, label: "ULTRA · 1440P" } };
+const QUALITY = { standard: { width: 1280, height: 720, columns: 160, label: "STANDARD · 720P" }, high: { width: 1920, height: 1080, columns: 240, label: "HIGH · 1080P" }, ultra: { width: 2560, height: 1440, columns: 320, label: "ULTRA · 1440P" } };
 const state = { file: null, url: null, columns: 240, fps: 60, quality: "ultra", palette: "color", engine: "worker", worker: null, workerJob: 0, workerPending: new Map(), raf: 0, recording: false, lastFrame: 0, renderUrl: null };
 
 function toast(message) {
@@ -68,9 +68,10 @@ async function sampleFrame() {
   if (!video.videoWidth || !video.videoHeight) return;
   const columns = state.columns, cellW = canvas.width / columns, cellH = cellW * 1.72;
   const rows = Math.max(1, Math.floor(canvas.height / cellH));
-  if (sample.width !== columns || sample.height !== rows) { sample.width = columns; sample.height = rows; }
-  sampleCtx.drawImage(video, 0, 0, columns, rows);
-  const pixels = sampleCtx.getImageData(0, 0, columns, rows).data;
+  const sampleWidth = columns * 2, sampleHeight = rows * 2;
+  if (sample.width !== sampleWidth || sample.height !== sampleHeight) { sample.width = sampleWidth; sample.height = sampleHeight; }
+  sampleCtx.drawImage(video, 0, 0, sampleWidth, sampleHeight);
+  const pixels = sampleCtx.getImageData(0, 0, sampleWidth, sampleHeight).data;
   let result;
   if (state.engine === "worker") {
     try { result = await processPixelsInWorker(pixels, columns, rows); }
@@ -83,7 +84,7 @@ async function sampleFrame() {
   } else result = processPixelsMain(pixels, columns, rows);
   const { indices, colors } = result;
   ctx.fillStyle = "#050707"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.font = Math.max(5, Math.floor(cellH * .88)) + "px 'DM Mono', ui-monospace, monospace";
+  ctx.font = Math.max(1, Math.floor(cellH * .88)) + "px 'DM Mono', ui-monospace, monospace";
   ctx.textBaseline = "top";
   for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
     const i = y * columns + x, c = i * 3;
@@ -93,11 +94,18 @@ async function sampleFrame() {
 }
 function processPixelsMain(pixels, columns, rows) {
   const indices = new Uint8Array(columns * rows), colors = new Uint8ClampedArray(columns * rows * 3);
+  const sampleWidth = columns * 2;
   for (let i = 0; i < columns * rows; i++) {
-    const p = i * 4, red = pixels[p], green = pixels[p + 1], blue = pixels[p + 2];
-    // Rec.709 luma drives glyph selection; full-color output keeps source RGB intact.
+    const x = (i % columns) * 2, y = Math.floor(i / columns) * 2;
+    let red = 0, green = 0, blue = 0;
+    for (let sy = 0; sy < 2; sy++) for (let sx = 0; sx < 2; sx++) {
+      const p = ((y + sy) * sampleWidth + x + sx) * 4;
+      red += pixels[p]; green += pixels[p + 1]; blue += pixels[p + 2];
+    }
+    red = Math.round(red / 4); green = Math.round(green / 4); blue = Math.round(blue / 4);
+    // Rec.709 luma drives glyph selection; averaged source RGB remains un-darkened.
     const brightness = (red * .2126 + green * .7152 + blue * .0722) / 255;
-    indices[i] = Math.min(chars.length - 1, Math.floor(brightness * (chars.length - 1)));
+    indices[i] = Math.min(chars.length - 1, Math.round(brightness * (chars.length - 1)));
     let r, g, b;
     if (state.palette === "mono") r = g = b = Math.round(32 + brightness * 223);
     else if (state.palette === "matrix") {
@@ -126,7 +134,11 @@ function updateControls() {
 function applyQuality(mode) {
   state.quality = mode;
   const q = QUALITY[mode];
-  canvas.width = q.width; canvas.height = q.height;
+  const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : q.width / q.height;
+  const longSide = Math.max(q.width, q.height);
+  if (aspect >= 1) { canvas.width = longSide; canvas.height = Math.max(1, Math.round(longSide / aspect)); }
+  else { canvas.height = longSide; canvas.width = Math.max(1, Math.round(longSide * aspect)); }
+  $("previewWrap").style.aspectRatio = canvas.width + " / " + canvas.height;
   state.columns = q.columns;
   $("columns").value = String(state.columns);
   document.querySelectorAll("[data-quality]").forEach(button => button.classList.toggle("selected", button.dataset.quality === mode));
