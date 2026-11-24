@@ -10,3 +10,31 @@ footer{border-top:1px solid #202624;min-height:84px;padding:20px clamp(22px,6vw,
 @media(max-width:900px){main{padding:0 22px}.workspace-grid{grid-template-columns:1fr}.preview-panel{border-right:0;border-bottom:1px solid var(--line)}.control-panel{display:grid;grid-template-columns:1fr 1fr;gap:0 22px}.control-block:nth-child(1){grid-column:1/-1}.control-actions,.privacy-note{grid-column:1/-1}.how-section{gap:40px}}
 @media(max-width:600px){.topbar{height:64px;padding:0 18px}.brand{font-size:10px;gap:8px}.brand-mark{width:18px;height:18px}.topbar-right{gap:0}.privacy{display:none}.github-link{font-size:9px}main{padding:0 14px}.hero{padding:68px 4px 42px}.hero h1{font-size:clamp(48px,13vw,72px);margin-top:24px}.hero-copy{font-size:12px}.studio-head{padding:18px}.preview-panel{padding:14px}.control-panel{padding:20px 16px;grid-template-columns:1fr}.control-block:nth-child(1),.control-actions,.privacy-note{grid-column:auto}.control-block{margin-bottom:16px;padding-bottom:17px}.studio-head h2{font-size:17px}.workspace-status{font-size:8px}.result-panel{align-items:flex-start;flex-direction:column;padding:18px}.download-button{width:100%}.how-section{grid-template-columns:1fr;gap:14px;padding:76px 4px 78px}.how-section h2{font-size:43px}.feature-list article{padding:16px 0}footer{padding:22px 18px;flex-wrap:wrap}footer>span:nth-child(2){order:3;width:100%;font-size:7px}.desktop-only{display:none}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+
+/* Roum ASCII Studio — classic monochrome interface */
+:root{--bg:#000;--panel:#090909;--panel-2:#111;--line:#292929;--muted:#929292;--text:#f7f7f7;--lime:#fff;--lime-2:#ddd}
+body{background:#000}
+.ambient{display:none}
+.topbar{border-color:#242424}
+.brand-mark span{background:#fff}
+.eyebrow-line{background:#fff}
+.gradient-text{background:none;color:#fff}
+.studio{background:#080808;border-color:#292929;box-shadow:0 28px 90px #000}
+.workspace-status i,.privacy i,.live-dot i{background:#fff;box-shadow:0 0 8px #ffffff55}
+.upload-zone{background:#080808;border-color:#444}
+.upload-zone:hover,.upload-zone.dragover{border-color:#fff;background:#111}
+.upload-icon,.upload-zone u,.control-heading output,.feature-number,.privacy-note span{color:#fff}
+.segmented button.selected{background:#fff;color:#000;box-shadow:none}
+.palette.selected{border-color:#fff;background:#171717;color:#fff}
+.button-primary{border-color:#fff;background:#fff;color:#000}
+.button-primary:not(:disabled):hover{background:#dedede}
+.button-secondary{border-color:#555;background:#101010;color:#fff}
+.progress-track span{background:#fff}
+.result-panel{border-color:#333;background:#101010}
+.toast{background:#fff;color:#000}
+.play-symbol{border-color:#fff;color:#fff}
+.file-card{background:#111;border-color:#383838}
+.upload-zone small,.range-labels,.preview-foot,.tiny-label,.section-kicker,.panel-top,.preview-dimensions,.progress-top{color:#929292}
+.palette-color{background:linear-gradient(90deg,#fff,#aaa);-webkit-background-clip:text;background-clip:text}
+.palette-matrix{color:#fff}
+@media(prefers-reduced-motion:reduce){.button:not(:disabled):hover{transform:none}}
