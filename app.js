@@ -164,6 +164,17 @@ async function convertToMp4(webmBlob) {
   const { FFmpeg } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
   const { toBlobURL } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js");
   const ffmpeg = new FFmpeg(), base = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
+  ffmpeg.on("progress", ({ progress }) => {
+    const pct = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
+    setProgress(90 + pct * 9, "ENCODING MP4", "Encoding video · " + Math.round(pct * 100) + "%");
+  });
+  ffmpeg.on("log", ({ message }) => {
+    if (message && /frame=/.test(message)) {
+      const match = message.match(/frame=\s*(\d+)/);
+      if (match) $("progressDetail").textContent = "Encoding frame " + match[1] + "…";
+    }
+  });
+  setProgress(90, "LOADING MP4 ENCODER", "Loading video encoder…");
   await ffmpeg.load({
     classWorkerURL: await toBlobURL("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js", "text/javascript"),
     coreURL: await toBlobURL(base + "/ffmpeg-core.js", "text/javascript"),
@@ -173,7 +184,7 @@ async function convertToMp4(webmBlob) {
   const extension = (state.file.name.split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "");
   const originalName = "original." + extension;
   await ffmpeg.writeFile(originalName, new Uint8Array(await state.file.arrayBuffer()));
-  await ffmpeg.exec(["-i", "ascii-recording." + (webmBlob.type.includes("mp4") ? "mp4" : "webm"), "-i", originalName, "-map", "0:v:0", "-map", "1:a?", "-c:v", "libx264", "-preset", "medium", "-crf", "16", "-pix_fmt", "yuv420p", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "24M", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", "roum-ascii.mp4"]);
+  await ffmpeg.exec(["-i", "ascii-recording." + (webmBlob.type.includes("mp4") ? "mp4" : "webm"), "-i", originalName, "-map", "0:v:0", "-map", "1:a?", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "24M", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", "roum-ascii.mp4"]);
   const data = await ffmpeg.readFile("roum-ascii.mp4");
   return new Blob([data], { type: "video/mp4" });
 }
@@ -221,6 +232,19 @@ async function recordVideo() {
     if (state.renderUrl) URL.revokeObjectURL(state.renderUrl);
     state.renderUrl = URL.createObjectURL(output);
     $("downloadButton").href = state.renderUrl; $("downloadButton").download = "roum-ascii." + fileExtension;
+    $("saveGalleryButton").onclick = async () => {
+      const file = new File([output], "roum-ascii." + fileExtension, { type: output.type || (fileExtension === "mp4" ? "video/mp4" : "video/webm") });
+      if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+        try {
+          await navigator.share({ files: [file], title: "Roum ASCII video" });
+        } catch (shareError) {
+          if (shareError.name !== "AbortError") toast("Could not open the share menu. Use Download instead.");
+        }
+      } else {
+        toast("Use Download, then open the file and choose Save Video to add it to Photos.");
+        $("downloadButton").click();
+      }
+    };
     $("downloadButton").textContent = "↓ Download " + label;
     $("resultMeta").textContent = label + " · " + (output.size / 1024 / 1024).toFixed(1) + " MB";
     $("resultPanel").classList.remove("hidden"); $("renderButton").disabled = false; $("previewButton").disabled = false;
