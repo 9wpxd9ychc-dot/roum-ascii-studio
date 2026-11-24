@@ -20,7 +20,7 @@ function formatTime(seconds) {
 }
 function setStatus(label, active = false) {
   $("workspaceStatus").innerHTML = "<i></i> " + label;
-  $("workspaceStatus").style.color = active ? "#c4f36a" : "";
+  $("workspaceStatus").style.color = active ? "#ffffff" : "";
 }
 function drawPlaceholder() {
   ctx.fillStyle = "#050707"; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -70,9 +70,22 @@ function animate(now) {
   if (!video.paused && !video.ended) state.raf = requestAnimationFrame(animate);
 }
 function updateControls() {
-  $("columnsValue").textContent = state.columns; $("fpsValue").textContent = state.fps + " FPS";
-  $("previewDimensions").textContent = "1280 × 720";
+  $("columnsValue").textContent = state.columns;
+  $("fpsValue").textContent = state.fps + " FPS";
+  $("previewDimensions").textContent = canvas.width + " × " + canvas.height;
+  if ($("resolutionValue")) $("resolutionValue").textContent = QUALITY[state.quality].label;
 }
+function applyQuality(mode) {
+  state.quality = mode;
+  const q = QUALITY[mode];
+  canvas.width = q.width; canvas.height = q.height;
+  state.columns = q.columns;
+  $("columns").value = String(state.columns);
+  document.querySelectorAll("[data-quality]").forEach(button => button.classList.toggle("selected", button.dataset.quality === mode));
+  updateControls();
+  if (video.readyState >= 2) sampleFrame(); else drawPlaceholder();
+}
+document.querySelectorAll("[data-quality]").forEach(button => button.addEventListener("click", () => applyQuality(button.dataset.quality)));
 function stopPreview() {
   video.pause(); cancelAnimationFrame(state.raf);
   $("previewButton").innerHTML = "<span>▶</span> Preview";
@@ -142,7 +155,8 @@ function setProgress(percent, label, detail) {
   $("progressLabel").textContent = label; $("progressDetail").textContent = detail;
 }
 function chooseRecorderType() {
-  const options = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+  if (!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== "function") return "";
+  const options = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4;codecs=h264", "video/mp4"];
   return options.find(type => MediaRecorder.isTypeSupported(type)) || "";
 }
 async function convertToMp4(webmBlob) {
@@ -171,7 +185,15 @@ async function recordVideo() {
   setProgress(0, "RENDERING ASCII FRAMES", "Starting local video render…");
   state.recording = true; state.lastFrame = 0; setStatus("RENDERING", true);
   const stream = canvas.captureStream(state.fps), mimeType = chooseRecorderType();
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType, videoBitsPerSecond: 5000000 } : { videoBitsPerSecond: 5000000 });
+  let recorder;
+  try {
+    recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 12000000 });
+  } catch (error) {
+    stream.getTracks().forEach(track => track.stop());
+    state.recording = false; $("renderButton").disabled = false; $("previewButton").disabled = !state.file;
+    toast("This browser cannot record at the selected settings. Try High or Standard quality.");
+    setStatus("RENDER NOT SUPPORTED"); return;
+  }
   const chunks = [];
   recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   const finished = new Promise((resolve, reject) => {
@@ -189,8 +211,8 @@ async function recordVideo() {
     await new Promise(resolve => video.addEventListener("ended", resolve, { once: true }));
     clearInterval(progressTimer); cancelAnimationFrame(state.raf); recorder.stop();
     const webm = await finished; video.pause(); state.recording = false; stream.getTracks().forEach(track => track.stop());
-    let output = webm, fileExtension = "webm", label = "WEBM";
-    try { output = await convertToMp4(webm); fileExtension = "mp4"; label = "MP4"; }
+    let output = webm, fileExtension = webm.type.includes("mp4") ? "mp4" : "webm", label = fileExtension.toUpperCase();
+    if (fileExtension !== "mp4") try { output = await convertToMp4(webm); fileExtension = "mp4"; label = "MP4"; }
     catch (error) {
       console.warn("MP4 conversion unavailable; keeping browser recording.", error);
       toast("MP4 encoder unavailable. Your browser video is ready as WebM.");
