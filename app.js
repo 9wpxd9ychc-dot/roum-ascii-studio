@@ -8,7 +8,7 @@ const chars = " .'^,:;Il!i><~+_-?][}{1)(|\\/*tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&
 const sample = document.createElement("canvas");
 const sampleCtx = sample.getContext("2d", { willReadFrequently: true });
 const QUALITY = { standard: { width: 1280, height: 720, columns: 120, label: "STANDARD · 720P" }, high: { width: 1920, height: 1080, columns: 180, label: "HIGH · 1080P" }, ultra: { width: 2560, height: 1440, columns: 240, label: "ULTRA · 1440P" } };
-const state = { file: null, url: null, columns: 240, fps: 60, quality: "ultra", palette: "color", raf: 0, recording: false, lastFrame: 0, renderUrl: null };
+const state = { file: null, url: null, columns: 240, fps: 60, quality: "ultra", palette: "color", engine: "worker", worker: null, workerJob: 0, workerPending: new Map(), raf: 0, recording: false, lastFrame: 0, renderUrl: null };
 
 function toast(message) {
   const el = $("toast"); el.textContent = message; el.classList.add("show");
@@ -39,34 +39,81 @@ function drawPlaceholder() {
     ctx.fillText(line, 90 + (i % 2) * 16, 205 + i * 31);
   });
 }
-function sampleFrame() {
+function ensureWorker() {
+  if (state.worker) return state.worker;
+  if (!("Worker" in window)) throw new Error("Web Workers are unavailable in this browser.");
+  const worker = new Worker(new URL("./ascii-worker.js", import.meta.url), { type: "module" });
+  worker.onmessage = ({ data }) => {
+    const pending = state.workerPending.get(data.id);
+    if (!pending) return;
+    state.workerPending.delete(data.id);
+    pending.resolve({ indices: new Uint8Array(data.indices), colors: new Uint8ClampedArray(data.colors) });
+  };
+  worker.onerror = () => {
+    for (const pending of state.workerPending.values()) pending.reject(new Error("Worker engine failed."));
+    state.workerPending.clear(); state.worker = null;
+  };
+  state.worker = worker;
+  return worker;
+}
+function processPixelsInWorker(pixels, columns, rows) {
+  const worker = ensureWorker(), id = ++state.workerJob;
+  return new Promise((resolve, reject) => {
+    state.workerPending.set(id, { resolve, reject });
+    const copy = new Uint8ClampedArray(pixels);
+    worker.postMessage({ id, pixels: copy.buffer, columns, rows, palette: state.palette, chars }, [copy.buffer]);
+  });
+}
+async function sampleFrame() {
   if (!video.videoWidth || !video.videoHeight) return;
   const columns = state.columns, cellW = canvas.width / columns, cellH = cellW * 1.72;
   const rows = Math.max(1, Math.floor(canvas.height / cellH));
   if (sample.width !== columns || sample.height !== rows) { sample.width = columns; sample.height = rows; }
   sampleCtx.drawImage(video, 0, 0, columns, rows);
   const pixels = sampleCtx.getImageData(0, 0, columns, rows).data;
+  let result;
+  if (state.engine === "worker") {
+    try { result = await processPixelsInWorker(pixels, columns, rows); }
+    catch {
+      state.engine = "main";
+      document.querySelectorAll("[data-engine]").forEach(button => button.classList.toggle("selected", button.dataset.engine === "main"));
+      toast("Worker Engine unavailable. Switched to Compatibility Engine.");
+      result = processPixelsMain(pixels, columns, rows);
+    }
+  } else result = processPixelsMain(pixels, columns, rows);
+  const { indices, colors } = result;
   ctx.fillStyle = "#050707"; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.font = Math.max(5, Math.floor(cellH * .88)) + "px 'DM Mono', ui-monospace, monospace";
   ctx.textBaseline = "top";
   for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
-    const p = (y * columns + x) * 4, red = pixels[p], green = pixels[p + 1], blue = pixels[p + 2];
-    const brightness = (red * .299 + green * .587 + blue * .114) / 255;
-    const char = chars[Math.min(chars.length - 1, Math.floor(brightness * (chars.length - 1)))];
-    if (state.palette === "mono") {
-      const tone = Math.round(95 + brightness * 155); ctx.fillStyle = "rgb(" + tone + "," + tone + "," + tone + ")";
-    } else if (state.palette === "matrix") {
-      const tone = Math.round(65 + brightness * 170); ctx.fillStyle = "rgb(" + Math.round(tone * .58) + "," + tone + "," + Math.round(tone * .42) + ")";
-    } else {
-      const lift = .32 + brightness * .68;
-      ctx.fillStyle = "rgb(" + Math.round(red * lift) + "," + Math.round(green * lift) + "," + Math.round(blue * lift) + ")";
-    }
-    ctx.fillText(char, x * cellW, y * cellH);
+    const i = y * columns + x, c = i * 3;
+    ctx.fillStyle = "rgb(" + colors[c] + "," + colors[c + 1] + "," + colors[c + 2] + ")";
+    ctx.fillText(chars[indices[i]], x * cellW, y * cellH);
   }
 }
-function animate(now) {
+function processPixelsMain(pixels, columns, rows) {
+  const indices = new Uint8Array(columns * rows), colors = new Uint8ClampedArray(columns * rows * 3);
+  for (let i = 0; i < columns * rows; i++) {
+    const p = i * 4, red = pixels[p], green = pixels[p + 1], blue = pixels[p + 2];
+    const brightness = (red * .299 + green * .587 + blue * .114) / 255;
+    indices[i] = Math.min(chars.length - 1, Math.floor(brightness * (chars.length - 1)));
+    let r, g, b;
+    if (state.palette === "mono") r = g = b = Math.round(95 + brightness * 155);
+    else if (state.palette === "matrix") {
+      const tone = Math.round(65 + brightness * 170);
+      r = Math.round(tone * .58); g = tone; b = Math.round(tone * .42);
+    } else {
+      const lift = .32 + brightness * .68;
+      r = Math.round(red * lift); g = Math.round(green * lift); b = Math.round(blue * lift);
+    }
+    const c = i * 3; colors[c] = r; colors[c + 1] = g; colors[c + 2] = b;
+  }
+  return { indices, colors };
+}
+async function animate(now) {
   if (now - state.lastFrame < 1000 / state.fps) { state.raf = requestAnimationFrame(animate); return; }
-  state.lastFrame = now; sampleFrame();
+  state.lastFrame = now;
+  await sampleFrame();
   if (!video.paused && !video.ended) state.raf = requestAnimationFrame(animate);
 }
 function updateControls() {
@@ -86,6 +133,12 @@ function applyQuality(mode) {
   if (video.readyState >= 2) sampleFrame(); else drawPlaceholder();
 }
 document.querySelectorAll("[data-quality]").forEach(button => button.addEventListener("click", () => applyQuality(button.dataset.quality)));
+document.querySelectorAll("[data-engine]").forEach(button => button.addEventListener("click", () => {
+  state.engine = button.dataset.engine;
+  document.querySelectorAll("[data-engine]").forEach(item => item.classList.toggle("selected", item === button));
+  if (video.readyState >= 2) sampleFrame();
+  toast(state.engine === "worker" ? "Worker Engine selected." : "Compatibility Engine selected.");
+}));
 function stopPreview() {
   video.pause(); cancelAnimationFrame(state.raf);
   $("previewButton").innerHTML = "<span>▶</span> Preview";
@@ -178,24 +231,8 @@ async function recordVideo() {
   state.lastFrame = 0;
   setStatus("RENDERING", true);
 
-  // Mobile browsers struggle with thousands of glyphs per frame at 1440p/60 FPS.
-  // Render a stable mobile-friendly master, then restore the user's preview settings.
   const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-  const originalCanvas = { width: canvas.width, height: canvas.height, columns: state.columns, fps: state.fps };
-  if (isMobile) {
-    canvas.width = 1280;
-    canvas.height = 720;
-    state.columns = Math.min(state.columns, 120);
-    state.fps = Math.min(state.fps, 30);
-  }
-  const restoreSettings = () => {
-    canvas.width = originalCanvas.width;
-    canvas.height = originalCanvas.height;
-    state.columns = originalCanvas.columns;
-    state.fps = originalCanvas.fps;
-    updateControls();
-    if (video.readyState >= 2) sampleFrame();
-  };
+  const restoreSettings = () => { if (video.readyState >= 2) sampleFrame(); };
 
   let stream;
   let recorder;
@@ -240,7 +277,7 @@ async function recordVideo() {
       });
     }
 
-    sampleFrame();
+    await sampleFrame();
     recorder.start(250);
     const duration = video.duration;
     const ended = new Promise((resolve, reject) => {
@@ -264,7 +301,7 @@ async function recordVideo() {
     progressTimer = setInterval(() => {
       const percent = Math.min(88, video.currentTime / duration * 88);
       setProgress(percent, "RENDERING ASCII FRAMES",
-        (isMobile ? "Mobile-optimized · " : "") + formatTime(video.currentTime) + " / " + formatTime(duration));
+        (isMobile ? "Mobile device · " : "Desktop · ") + state.quality.toUpperCase() + " · " + state.fps + " FPS · " + formatTime(video.currentTime) + " / " + formatTime(duration));
     }, 180);
 
     await ended;
@@ -299,7 +336,7 @@ async function recordVideo() {
     };
     $("downloadButton").textContent = "↓ Download " + label;
     $("resultMeta").textContent = label + " · " + (output.size / 1024 / 1024).toFixed(1) + " MB" +
-      (isMobile ? " · mobile optimized" : "");
+      (" · " + state.engine.toUpperCase() + " ENGINE");
     $("resultPanel").classList.remove("hidden");
     $("renderButton").innerHTML = "<span>✳</span> Render again <span class='button-arrow'>↗</span>";
     setProgress(100, "RENDER COMPLETE", "Your video is ready to save.");
