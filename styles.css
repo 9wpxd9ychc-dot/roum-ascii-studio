@@ -38,3 +38,5 @@ body{background:#000}
 .palette-color{background:linear-gradient(90deg,#fff,#aaa);-webkit-background-clip:text;background-clip:text}
 .palette-matrix{color:#fff}
 @media(prefers-reduced-motion:reduce){.button:not(:disabled):hover{transform:none}}
+
+.result-actions{display:flex;gap:8px;flex-wrap:wrap}.result-actions .button{min-width:150px}@media(max-width:600px){.result-actions{width:100%;flex-direction:column}.result-actions .button{width:100%}}
