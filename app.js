@@ -8,7 +8,7 @@ const chars = " .'^,:;Il!i><~+_-?][}{1)(|\\/*tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&
 const sample = document.createElement("canvas");
 const sampleCtx = sample.getContext("2d", { willReadFrequently: true });
 const QUALITY = { standard: { width: 1280, height: 720, columns: 120, label: "STANDARD · 720P" }, high: { width: 1920, height: 1080, columns: 180, label: "HIGH · 1080P" }, ultra: { width: 2560, height: 1440, columns: 240, label: "ULTRA · 1440P" } };
-const state = { file: null, url: null, columns: 240, fps: 30, quality: "ultra", palette: "color", raf: 0, recording: false, lastFrame: 0, renderUrl: null };
+const state = { file: null, url: null, columns: 240, fps: 60, quality: "ultra", palette: "color", raf: 0, recording: false, lastFrame: 0, renderUrl: null };
 
 function toast(message) {
   const el = $("toast"); el.textContent = message; el.classList.add("show");
