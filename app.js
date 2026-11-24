@@ -157,106 +157,170 @@ function setProgress(percent, label, detail) {
 }
 function chooseRecorderType() {
   if (!window.MediaRecorder || typeof MediaRecorder.isTypeSupported !== "function") return "";
-  const options = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4;codecs=h264", "video/mp4"];
+  const isApple = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const options = isApple
+    ? ["video/mp4;codecs=h264", "video/mp4", "video/webm;codecs=vp8", "video/webm"]
+    : ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4;codecs=h264", "video/mp4"];
   return options.find(type => MediaRecorder.isTypeSupported(type)) || "";
-}
-async function convertToMp4(webmBlob) {
-  setProgress(90, "ENCODING MP4", "Preparing MP4 export. This may take a little while…");
-  const { FFmpeg } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js");
-  const { toBlobURL } = await import("https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/esm/index.js");
-  const ffmpeg = new FFmpeg(), base = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd";
-  ffmpeg.on("progress", ({ progress }) => {
-    const pct = Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0;
-    setProgress(90 + pct * 9, "ENCODING MP4", "Encoding video · " + Math.round(pct * 100) + "%");
-  });
-  ffmpeg.on("log", ({ message }) => {
-    if (message && /frame=/.test(message)) {
-      const match = message.match(/frame=\s*(\d+)/);
-      if (match) $("progressDetail").textContent = "Encoding frame " + match[1] + "…";
-    }
-  });
-  setProgress(90, "LOADING MP4 ENCODER", "Loading video encoder…");
-  await ffmpeg.load({
-    classWorkerURL: await toBlobURL("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/worker.js", "text/javascript"),
-    coreURL: await toBlobURL(base + "/ffmpeg-core.js", "text/javascript"),
-    wasmURL: await toBlobURL(base + "/ffmpeg-core.wasm", "application/wasm")
-  });
-  await ffmpeg.writeFile("ascii-recording." + (webmBlob.type.includes("mp4") ? "mp4" : "webm"), new Uint8Array(await webmBlob.arrayBuffer()));
-  const extension = (state.file.name.split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "");
-  const originalName = "original." + extension;
-  await ffmpeg.writeFile(originalName, new Uint8Array(await state.file.arrayBuffer()));
-  await ffmpeg.exec(["-i", "ascii-recording." + (webmBlob.type.includes("mp4") ? "mp4" : "webm"), "-i", originalName, "-map", "0:v:0", "-map", "1:a?", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-b:v", "12M", "-maxrate", "16M", "-bufsize", "24M", "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart", "roum-ascii.mp4"]);
-  const data = await ffmpeg.readFile("roum-ascii.mp4");
-  return new Blob([data], { type: "video/mp4" });
 }
 async function recordVideo() {
   if (!state.file || state.recording) return;
-  if (!window.MediaRecorder || !canvas.captureStream) { toast("Video recording is not supported in this browser."); return; }
-  stopPreview(); $("renderButton").disabled = true; $("previewButton").disabled = true;
-  $("renderProgress").classList.remove("hidden"); $("resultPanel").classList.add("hidden");
-  setProgress(0, "RENDERING ASCII FRAMES", "Starting local video render…");
-  state.recording = true; state.lastFrame = 0; setStatus("RENDERING", true);
-  const stream = canvas.captureStream(state.fps), mimeType = chooseRecorderType();
-  let recorder;
-  try {
-    recorder = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: 12000000 });
-  } catch (error) {
-    stream.getTracks().forEach(track => track.stop());
-    state.recording = false; $("renderButton").disabled = false; $("previewButton").disabled = !state.file;
-    toast("This browser cannot record at the selected settings. Try High or Standard quality.");
-    setStatus("RENDER NOT SUPPORTED"); return;
+  if (!window.MediaRecorder || !canvas.captureStream) {
+    toast("Video recording is not supported in this browser."); return;
   }
-  const chunks = [];
-  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-  const finished = new Promise((resolve, reject) => {
-    recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || "video/webm" }));
-    recorder.onerror = () => reject(new Error("Browser recording failed."));
-  });
+
+  stopPreview();
+  $("renderButton").disabled = true;
+  $("previewButton").disabled = true;
+  $("renderProgress").classList.remove("hidden");
+  $("resultPanel").classList.add("hidden");
+  state.recording = true;
+  state.lastFrame = 0;
+  setStatus("RENDERING", true);
+
+  // Mobile browsers struggle with thousands of glyphs per frame at 1440p/60 FPS.
+  // Render a stable mobile-friendly master, then restore the user's preview settings.
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+  const originalCanvas = { width: canvas.width, height: canvas.height, columns: state.columns, fps: state.fps };
+  if (isMobile) {
+    canvas.width = 1280;
+    canvas.height = 720;
+    state.columns = Math.min(state.columns, 120);
+    state.fps = Math.min(state.fps, 30);
+  }
+  const restoreSettings = () => {
+    canvas.width = originalCanvas.width;
+    canvas.height = originalCanvas.height;
+    state.columns = originalCanvas.columns;
+    state.fps = originalCanvas.fps;
+    updateControls();
+    if (video.readyState >= 2) sampleFrame();
+  };
+
+  let stream;
+  let recorder;
+  let progressTimer;
+  let renderTimeout;
   try {
-    if (video.currentTime !== 0) await new Promise(resolve => { video.addEventListener("seeked", resolve, { once: true }); video.currentTime = 0; });
-    sampleFrame(); recorder.start(500); await video.play(); state.raf = requestAnimationFrame(animate);
-    const duration = video.duration;
-    const progressTimer = setInterval(() => {
-      const percent = Math.min(88, video.currentTime / duration * 88);
-      setProgress(percent, "RENDERING ASCII FRAMES", "Frame " + formatTime(video.currentTime) + " / " + formatTime(duration));
-    }, 180);
-    await new Promise(resolve => video.addEventListener("ended", resolve, { once: true }));
-    clearInterval(progressTimer); cancelAnimationFrame(state.raf); recorder.stop();
-    const webm = await finished; video.pause(); state.recording = false; stream.getTracks().forEach(track => track.stop());
-    let output = webm, fileExtension = webm.type.includes("mp4") ? "mp4" : "webm", label = fileExtension.toUpperCase();
-    if (fileExtension !== "mp4") try { output = await convertToMp4(webm); fileExtension = "mp4"; label = "MP4"; }
-    catch (error) {
-      console.warn("MP4 conversion unavailable; keeping browser recording.", error);
-      toast("MP4 encoder unavailable. Your browser video is ready as WebM.");
-      setProgress(100, "WEBM EXPORT READY", "MP4 conversion was unavailable in this browser.");
+    stream = canvas.captureStream(state.fps);
+    // Keep source audio when the browser exposes a capturable audio track.
+    const captureSource = video.captureStream || video.webkitCaptureStream;
+    if (captureSource) {
+      try {
+        const sourceStream = captureSource.call(video);
+        sourceStream.getAudioTracks().forEach(track => stream.addTrack(track));
+      } catch (audioError) { console.info("Source audio capture is unavailable.", audioError); }
     }
+
+    const mimeType = chooseRecorderType();
+    recorder = new MediaRecorder(stream, {
+      ...(mimeType ? { mimeType } : {}),
+      videoBitsPerSecond: isMobile ? 5000000 : 12000000
+    });
+    const chunks = [];
+    recorder.ondataavailable = event => {
+      if (event.data && event.data.size) chunks.push(event.data);
+    };
+    const finished = new Promise((resolve, reject) => {
+      recorder.onstop = () => resolve(new Blob(chunks, { type: recorder.mimeType || mimeType || "video/webm" }));
+      recorder.onerror = () => reject(new Error("The browser stopped recording unexpectedly."));
+    });
+
+    if (video.currentTime !== 0) {
+      await new Promise((resolve, reject) => {
+        const onSeeked = () => { cleanup(); resolve(); };
+        const onError = () => { cleanup(); reject(new Error("Could not rewind the source video.")); };
+        const cleanup = () => {
+          video.removeEventListener("seeked", onSeeked);
+          video.removeEventListener("error", onError);
+        };
+        video.addEventListener("seeked", onSeeked, { once: true });
+        video.addEventListener("error", onError, { once: true });
+        video.currentTime = 0;
+      });
+    }
+
+    sampleFrame();
+    recorder.start(250);
+    const duration = video.duration;
+    const ended = new Promise((resolve, reject) => {
+      const onEnded = () => { cleanup(); resolve(); };
+      const onError = () => { cleanup(); reject(new Error("The source video could not be decoded during rendering.")); };
+      const cleanup = () => {
+        video.removeEventListener("ended", onEnded);
+        video.removeEventListener("error", onError);
+        clearTimeout(renderTimeout);
+      };
+      video.addEventListener("ended", onEnded, { once: true });
+      video.addEventListener("error", onError, { once: true });
+      renderTimeout = setTimeout(() => {
+        cleanup();
+        reject(new Error("Rendering timed out. Try a shorter video or Standard quality."));
+      }, Math.max(45000, duration * 4000));
+    });
+
+    await video.play();
+    state.raf = requestAnimationFrame(animate);
+    progressTimer = setInterval(() => {
+      const percent = Math.min(88, video.currentTime / duration * 88);
+      setProgress(percent, "RENDERING ASCII FRAMES",
+        (isMobile ? "Mobile-optimized · " : "") + formatTime(video.currentTime) + " / " + formatTime(duration));
+    }, 180);
+
+    await ended;
+    clearInterval(progressTimer);
+    cancelAnimationFrame(state.raf);
+    if (recorder.state !== "inactive") recorder.stop();
+    const output = await finished;
+    video.pause();
+
+    if (!output || output.size < 1000) throw new Error("The browser produced an empty video. Try Standard quality.");
+    const fileExtension = output.type.includes("mp4") ? "mp4" : "webm";
+    const label = fileExtension.toUpperCase();
     if (state.renderUrl) URL.revokeObjectURL(state.renderUrl);
     state.renderUrl = URL.createObjectURL(output);
-    $("downloadButton").href = state.renderUrl; $("downloadButton").download = "roum-ascii." + fileExtension;
+
+    $("downloadButton").href = state.renderUrl;
+    $("downloadButton").download = "roum-ascii." + fileExtension;
     $("saveGalleryButton").onclick = async () => {
-      const file = new File([output], "roum-ascii." + fileExtension, { type: output.type || (fileExtension === "mp4" ? "video/mp4" : "video/webm") });
-      if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+      const file = new File([output], "roum-ascii." + fileExtension, {
+        type: output.type || (fileExtension === "mp4" ? "video/mp4" : "video/webm")
+      });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({ files: [file], title: "Roum ASCII video" });
-        } catch (shareError) {
-          if (shareError.name !== "AbortError") toast("Could not open the share menu. Use Download instead.");
+        } catch (error) {
+          if (error.name !== "AbortError") toast("Could not open the Photos share menu. Try Download video.");
         }
       } else {
-        toast("Use Download, then open the file and choose Save Video to add it to Photos.");
+        toast("This browser cannot send video to Photos directly. Download it, then save it from Files.");
         $("downloadButton").click();
       }
     };
     $("downloadButton").textContent = "↓ Download " + label;
-    $("resultMeta").textContent = label + " · " + (output.size / 1024 / 1024).toFixed(1) + " MB";
-    $("resultPanel").classList.remove("hidden"); $("renderButton").disabled = false; $("previewButton").disabled = false;
+    $("resultMeta").textContent = label + " · " + (output.size / 1024 / 1024).toFixed(1) + " MB" +
+      (isMobile ? " · mobile optimized" : "");
+    $("resultPanel").classList.remove("hidden");
     $("renderButton").innerHTML = "<span>✳</span> Render again <span class='button-arrow'>↗</span>";
+    setProgress(100, "RENDER COMPLETE", "Your video is ready to save.");
     setStatus("RENDER COMPLETE", true);
-    if (fileExtension === "mp4") setProgress(100, "RENDER COMPLETE", "Your video is ready to save.");
   } catch (error) {
-    state.recording = false; stream.getTracks().forEach(track => track.stop());
-    console.error(error); toast(error.message || "Rendering failed. Try a shorter video."); setStatus("RENDER FAILED");
+    console.error(error);
+    toast(error.message || "Rendering failed. Try a shorter video.");
+    setStatus("RENDER FAILED");
+    if (recorder && recorder.state !== "inactive") {
+      try { recorder.stop(); } catch {}
+    }
   } finally {
-    $("renderButton").disabled = false; $("previewButton").disabled = !state.file;
+    clearInterval(progressTimer);
+    clearTimeout(renderTimeout);
+    cancelAnimationFrame(state.raf);
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    video.pause();
+    state.recording = false;
+    restoreSettings();
+    $("renderButton").disabled = false;
+    $("previewButton").disabled = !state.file;
   }
 }
 $("renderButton").addEventListener("click", recordVideo);
