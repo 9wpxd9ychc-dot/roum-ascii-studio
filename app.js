@@ -93,13 +93,13 @@ function stopPreview() {
 async function loadFile(file) {
   if (!file) return;
   if (!file.type.startsWith("video/") && !/\.(mp4|mov|webm|m4v)$/i.test(file.name)) { toast("Please choose a supported video file."); return; }
-  if (file.size > 20 * 1024 * 1024) { toast("This file is over the 20 MB limit."); return; }
+  if (file.size > 50 * 1024 * 1024) { toast("This file is over the 50 MB limit. Choose a shorter or smaller video."); return; }
   stopPreview();
   if (state.url) URL.revokeObjectURL(state.url);
   state.file = file; state.url = URL.createObjectURL(file);
   video.onloadeddata = () => { if (state.file) sampleFrame(); };
-  video.src = state.url; video.load();
   video.onloadedmetadata = () => {
+    if (!Number.isFinite(video.duration) || video.duration <= 0) { toast("Safari could not read this video. Try exporting it as MP4 or MOV in Photos."); clearFile(); return; }
     if (video.duration > 30) { toast("This video is longer than 30 seconds."); clearFile(); return; }
     $("fileName").textContent = file.name;
     $("fileMeta").textContent = (file.size / 1024 / 1024).toFixed(1) + " MB · " + formatTime(video.duration);
@@ -109,7 +109,8 @@ async function loadFile(file) {
     setStatus("SOURCE READY", true);
     if (video.readyState >= 2) sampleFrame();
   };
-  video.onerror = () => { toast("This video format could not be opened by your browser."); clearFile(); };
+  video.onerror = () => { toast("Safari could not open this video. Try MP4 or MOV, or export a compatible copy from Photos."); clearFile(); };
+  video.src = state.url; video.load();
 }
 function clearFile() {
   stopPreview();
