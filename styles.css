@@ -42,3 +42,6 @@ body{background:#000}
 .result-actions{display:flex;gap:8px;flex-wrap:wrap}.result-actions .button{min-width:150px}@media(max-width:600px){.result-actions{width:100%;flex-direction:column}.result-actions .button{width:100%}}
 
 .engine-options{grid-template-columns:1fr 1fr}.engine-options button{font-size:9px;letter-spacing:.02em}
+
+/* Preserve the uploaded video aspect ratio in the preview, including portrait sources. */
+.preview-wrap{max-height:min(70vh,760px)}
