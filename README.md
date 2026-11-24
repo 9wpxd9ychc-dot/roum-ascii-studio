@@ -8,7 +8,7 @@ Published with GitHub Pages using `.github/workflows/deploy-pages.yml`.
 
 ## Limits
 
-- Input video: 20 MB maximum
+- Input video: 50 MB maximum
 - Duration: 30 seconds maximum
 - Preview and rendering use browser APIs
 - MP4 encoding uses FFmpeg.wasm loaded from jsDelivr; if unavailable, the browser-recorded WebM is offered instead.
