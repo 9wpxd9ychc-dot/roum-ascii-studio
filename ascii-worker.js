@@ -5,16 +5,17 @@ self.onmessage = ({ data }) => {
   const colors = new Uint8ClampedArray(columns * rows * 3);
   for (let i = 0; i < columns * rows; i++) {
     const p = i * 4, r = rgba[p], g = rgba[p + 1], b = rgba[p + 2];
-    const brightness = (r * .299 + g * .587 + b * .114) / 255;
+    // Rec.709 luma drives glyph selection; full-color output keeps source RGB intact.
+    const brightness = (r * .2126 + g * .7152 + b * .0722) / 255;
     indices[i] = Math.min(chars.length - 1, Math.floor(brightness * (chars.length - 1)));
     let cr, cg, cb;
-    if (palette === "mono") cr = cg = cb = Math.round(95 + brightness * 155);
+    if (palette === "mono") cr = cg = cb = Math.round(32 + brightness * 223);
     else if (palette === "matrix") {
-      const tone = Math.round(65 + brightness * 170);
-      cr = Math.round(tone * .58); cg = tone; cb = Math.round(tone * .42);
+      const tone = Math.round(32 + brightness * 223);
+      cr = Math.round(tone * .34); cg = tone; cb = Math.round(tone * .22);
     } else {
-      const lift = .32 + brightness * .68;
-      cr = Math.round(r * lift); cg = Math.round(g * lift); cb = Math.round(b * lift);
+      // No brightness multiplier: dark and mid-tone pixels are not artificially crushed.
+      cr = r; cg = g; cb = b;
     }
     const c = i * 3; colors[c] = cr; colors[c + 1] = cg; colors[c + 2] = cb;
   }
