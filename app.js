@@ -95,16 +95,17 @@ function processPixelsMain(pixels, columns, rows) {
   const indices = new Uint8Array(columns * rows), colors = new Uint8ClampedArray(columns * rows * 3);
   for (let i = 0; i < columns * rows; i++) {
     const p = i * 4, red = pixels[p], green = pixels[p + 1], blue = pixels[p + 2];
-    const brightness = (red * .299 + green * .587 + blue * .114) / 255;
+    // Rec.709 luma drives glyph selection; full-color output keeps source RGB intact.
+    const brightness = (red * .2126 + green * .7152 + blue * .0722) / 255;
     indices[i] = Math.min(chars.length - 1, Math.floor(brightness * (chars.length - 1)));
     let r, g, b;
-    if (state.palette === "mono") r = g = b = Math.round(95 + brightness * 155);
+    if (state.palette === "mono") r = g = b = Math.round(32 + brightness * 223);
     else if (state.palette === "matrix") {
-      const tone = Math.round(65 + brightness * 170);
-      r = Math.round(tone * .58); g = tone; b = Math.round(tone * .42);
+      const tone = Math.round(32 + brightness * 223);
+      r = Math.round(tone * .34); g = tone; b = Math.round(tone * .22);
     } else {
-      const lift = .32 + brightness * .68;
-      r = Math.round(red * lift); g = Math.round(green * lift); b = Math.round(blue * lift);
+      // No brightness multiplier: dark and mid-tone pixels are not artificially crushed.
+      r = red; g = green; b = blue;
     }
     const c = i * 3; colors[c] = r; colors[c + 1] = g; colors[c + 2] = b;
   }
