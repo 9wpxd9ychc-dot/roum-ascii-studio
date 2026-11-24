@@ -167,6 +167,7 @@ async function loadFile(file) {
   video.onloadedmetadata = () => {
     if (!Number.isFinite(video.duration) || video.duration <= 0) { toast("Safari could not read this video. Try exporting it as MP4 or MOV in Photos."); clearFile(); return; }
     if (video.duration > 30) { toast("This video is longer than 30 seconds."); clearFile(); return; }
+    applyQuality(state.quality);
     $("fileName").textContent = file.name;
     $("fileMeta").textContent = (file.size / 1024 / 1024).toFixed(1) + " MB · " + formatTime(video.duration);
     $("fileCard").classList.remove("hidden"); uploadZone.classList.add("hidden");
