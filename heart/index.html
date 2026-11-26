@@ -67,23 +67,27 @@ canvas{display:block;width:100%;height:100%;background:#000;touch-action:pan-y}
     ctx.fillStyle="#000";ctx.fillRect(0,0,width,height);
     const pulse=1+0.035*Math.sin(elapsed*2.15);
     const ry=elapsed*.34,rx=-.17+Math.sin(elapsed*.21)*.08;
-    const cy=Math.cos(ry),sy=Math.sin(ry),cx=Math.cos(rx),sx=Math.sin(rx);
+    // The implicit heart's vertical axis is Z (its pointed end is at -Z).
+    // Spin around that axis, then apply a gentle X tilt. This keeps the heart upright.
+    const cz=Math.cos(ry),sz=Math.sin(ry),cx=Math.cos(rx),sx=Math.sin(rx);
     const scale=Math.min(width*.37,height*.39,330);
     const focal=Math.max(width,height)*1.25;
     const light=[-.36,.54,-.76];
     const projected=[];
     for(const p of points){
-      let x=p.x*pulse,y=p.y*pulse,z=p.z*pulse;
-      const x1=x*cy+z*sy,z1=-x*sy+z*cy;
-      const y2=y*cx-z1*sx,z2=y*sx+z1*cx;
-      const depth=z2+3.45;
+      const x=p.x*pulse,y=p.y*pulse,z=p.z*pulse;
+      const x1=x*cz-y*sz,y1=x*sz+y*cz,z1=z;
+      const y2=y1*cx-z1*sx,z2=y1*sx+z1*cx;
+      const depth=y2+3.45;
       if(depth<.2)continue;
-      const perspective=focal/(focal+z2*scale*.72);
+      const perspective=focal/(focal+y2*scale*.72);
       const px=width/2+x1*scale*perspective;
-      const py=height/2-y2*scale*perspective;
-      const dot=clamp((p.nx*light[0]+p.ny*light[1]+p.nz*light[2]+1)/2,0,1);
-      const front=clamp((z2+1.4)/2.8,.14,1);
-      projected.push({px,py,depth,size:clamp((width<600?9.5:10.5)*perspective,.5,13),brightness:.22+dot*.78,front,seed:p.seed,x:x1,y:y2,z:z2});
+      const py=height/2-z2*scale*perspective;
+      const nx1=p.nx*cz-p.ny*sz,ny1=p.nx*sz+p.ny*cz,nz1=p.nz;
+      const nx2=nx1,ny2=ny1*cx-nz1*sx,nz2=ny1*sx+nz1*cx;
+      const dot=clamp((nx2*light[0]+ny2*light[1]+nz2*light[2]+1)/2,0,1);
+      const front=clamp((y2+1.4)/2.8,.14,1);
+      projected.push({px,py,depth,size:clamp((width<600?9.5:10.5)*perspective,.5,13),brightness:.22+dot*.78,front,seed:p.seed,x:x1,y:z2,z:y2});
     }
     projected.sort((a,b)=>b.depth-a.depth);
     ctx.textAlign="center";ctx.textBaseline="middle";
