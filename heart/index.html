@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="description" content="A glowing, rotating 3D heart made entirely of ASCII characters.">
+<title>ASCII Heart — ROUM</title>
+<style>
+:root{color-scheme:dark;background:#000}
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#000}
+body{position:relative;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+canvas{display:block;width:100%;height:100%;background:#000;touch-action:pan-y}
+</style>
+</head>
+<body>
+<canvas id="heart" aria-label="A glowing three-dimensional ASCII heart rotating in space"></canvas>
+<script>
+(() => {
+  "use strict";
+  const canvas = document.getElementById("heart");
+  const ctx = canvas.getContext("2d", { alpha:false });
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  let width=0,height=0,dpr=1,points=[],raf=0,last=0,elapsed=0;
+  const chars=" .,:;!+*xX#%@&0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const equation=(x,y,z)=>{
+    const q=x*x+2.25*y*y+z*z-1;
+    return q*q*q-x*x*z*z*z-(9/80)*y*y*z*z*z;
+  };
+  function makeSurface(count){
+    const out=[];
+    const golden=Math.PI*(3-Math.sqrt(5));
+    for(let i=0;i<count;i++){
+      const v=1-2*(i+.5)/count;
+      const rxy=Math.sqrt(Math.max(0,1-v*v));
+      const phi=i*golden;
+      const dx=rxy*Math.cos(phi),dy=v,dz=rxy*Math.sin(phi);
+      let lo=0,hi=1.65;
+      for(let k=0;k<26;k++){
+        const mid=(lo+hi)/2;
+        if(equation(dx*mid,dy*mid,dz*mid)>0)hi=mid;else lo=mid;
+      }
+      const r=(lo+hi)/2,x=dx*r,y=dy*r,z=dz*r;
+      const e=0.0015;
+      const nx=equation(x+e,y,z)-equation(x-e,y,z);
+      const ny=equation(x,y+e,z)-equation(x,y-e,z);
+      const nz=equation(x,y,z+e)-equation(x,y,z-e);
+      const nlen=Math.hypot(nx,ny,nz)||1;
+      out.push({x,y,z,nx:nx/nlen,ny:ny/nlen,nz:nz/nlen,seed:Math.random()});
+    }
+    return out;
+  }
+  function resize(){
+    width=innerWidth;height=innerHeight;dpr=Math.min(devicePixelRatio||1,1.65);
+    canvas.width=Math.max(1,Math.floor(width*dpr));
+    canvas.height=Math.max(1,Math.floor(height*dpr));
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    points=makeSurface(width<600?950:1650);
+  }
+  function frame(now){
+    raf=requestAnimationFrame(frame);
+    if(!last)last=now;
+    const dt=Math.min(.04,(now-last)/1000);last=now;
+    if(!reducedMotion.matches)elapsed+=dt;
+    ctx.fillStyle="#000";ctx.fillRect(0,0,width,height);
+    const pulse=1+0.035*Math.sin(elapsed*2.15);
+    const ry=elapsed*.34,rx=-.17+Math.sin(elapsed*.21)*.08;
+    const cy=Math.cos(ry),sy=Math.sin(ry),cx=Math.cos(rx),sx=Math.sin(rx);
+    const scale=Math.min(width*.37,height*.39,330);
+    const focal=Math.max(width,height)*1.25;
+    const light=[-.36,.54,-.76];
+    const projected=[];
+    for(const p of points){
+      let x=p.x*pulse,y=p.y*pulse,z=p.z*pulse;
+      const x1=x*cy+z*sy,z1=-x*sy+z*cy;
+      const y2=y*cx-z1*sx,z2=y*sx+z1*cx;
+      const depth=z2+3.45;
+      if(depth<.2)continue;
+      const perspective=focal/(focal+z2*scale*.72);
+      const px=width/2+x1*scale*perspective;
+      const py=height/2-y2*scale*perspective;
+      const dot=clamp((p.nx*light[0]+p.ny*light[1]+p.nz*light[2]+1)/2,0,1);
+      const front=clamp((z2+1.4)/2.8,.14,1);
+      projected.push({px,py,depth,size:clamp((width<600?9.5:10.5)*perspective,.5,13),brightness:.22+dot*.78,front,seed:p.seed,x:x1,y:y2,z:z2});
+    }
+    projected.sort((a,b)=>b.depth-a.depth);
+    ctx.textAlign="center";ctx.textBaseline="middle";
+    ctx.globalCompositeOperation="lighter";
+    for(const p of projected){
+      if(p.px<-20||p.px>width+20||p.py<-20||p.py>height+20)continue;
+      const depthTint=clamp((p.z+1.4)/2.8,.15,1);
+      const edge=clamp((Math.abs(p.x)+Math.abs(p.y))*.3,0,1);
+      const value=clamp(p.brightness*.72+depthTint*.28,0,1);
+      let color;
+      if(value>.78)color="rgba(255,235,248,"+(0.76+value*.22)+")";
+      else if(value>.5)color="rgba(255,105,185,"+(0.42+value*.48)+")";
+      else color="rgba(205,24,112,"+(0.24+value*.42)+")";
+      const index=Math.floor((p.seed*.63+value*.37)*(chars.length-1));
+      ctx.font=(p.size<7?"":"bold ")+p.size.toFixed(1)+"px monospace";
+      ctx.shadowColor=value>.66?"#ff5ab7":"#c51a78";
+      ctx.shadowBlur=clamp(p.size*(value>.65?1.8:.85),1,18);
+      ctx.fillStyle=color;
+      ctx.fillText(chars[index],p.px,p.py);
+    }
+    ctx.shadowBlur=0;ctx.globalCompositeOperation="source-over";
+  }
+  function start(){if(!raf)raf=requestAnimationFrame(frame)}
+  document.addEventListener("visibilitychange",()=>{if(document.hidden){cancelAnimationFrame(raf);raf=0;last=0}else start()});
+  addEventListener("resize",resize,{passive:true});
+  reducedMotion.addEventListener?.("change",()=>{last=0});
+  resize();start();
+})();
+</script>
+</body>
+</html>
